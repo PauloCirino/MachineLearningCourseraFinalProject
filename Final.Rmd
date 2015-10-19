@@ -1,0 +1,219 @@
+---
+title: "FInal Project Machine Learning - MOOC"
+author: "Paulo Cirino Ribeiro Neto"
+date: "Sunday, October 18, 2015"
+output: html_document
+---
+
+# Packages Used
+
+In this project I have decided to use the Random Forest algorithm.
+This decision was based on the fact the this algorithm is usually one of the top 2 classification algorithms alongside with the bootstrap method.
+
+In this project I have decided to use the Random Forest algorithm.
+This decision was based on the fact the this algorithm is usually one of the top 2 classification algorithms alongside with the bootstrap method.
+The Random Forests method works by constructing a multitude of decision trees at training time and outputting the class that is the mode of the classes of the individual trees.
+This project uses the implementation by Leo Breiman and Adele Cutler in the package random Forests . I use the method *random Forest* with all the training data to train a method to predict the results of the course automated test.
+And to test the generality of the model I use a cross validation method implemented by myself.
+To acquire the result of the model we use a function made by myself with help of the package _core_ .
+
+```{r}
+require(caret, quietly=TRUE)
+require(randomForest, quietly=TRUE)
+```
+
+
+# Reading Data
+
+The Data read by the function bellow was obtained and download from the course page, but the Data was originally acquire by a brasilian univerty PUC-RIO reasearch team.
+
+```{r}
+OriginalTrainingDataSet <- read.csv(file = "./trainingFile.csv", head=TRUE,sep=",",na.strings=c("NA","#DIV/0!",""))
+OriginalValidationDataSet <- read.csv(file = "./testingFile.csv", head=TRUE,sep=",",na.strings=c("NA","#DIV/0!",""))
+```
+
+
+# Cleaning Data
+
+Since the Data has a lot of *N/A* colums we first have to clean the data, and in name of simplicity we are just going to remove of the colums with *N/A* values.
+
+```{r}
+colNotNA <- apply(OriginalTrainingDataSet,2,complete.cases)[1,]
+TrainingDataSet <- OriginalTrainingDataSet[,colNotNA][,-1]
+ValidationDataSet <- OriginalValidationDataSet[,colNotNA][,-1]
+```
+
+
+# Preaparing Data
+
+Just like in any other *DataScience* experiment we have to prepare the Data to fit the method's required data configuration.
+
+For this method in particular, we equalize and randomize bolth *DataSets* so they have the same variables and formats.
+
+```{r}
+X_TrainingDataSet <- TrainingDataSet[,-dim(TrainingDataSet)[2]]
+Y_TrainingDataSet <- TrainingDataSet[,dim(TrainingDataSet)[2]]
+
+pos<-sample(dim(TrainingDataSet)[1])
+X_TrainingDataSet <- X_TrainingDataSet[pos,]
+Y_TrainingDataSet <- Y_TrainingDataSet[pos]
+
+X_ValidationDataSet <- ValidationDataSet[,-dim(ValidationDataSet)[2]]
+```
+
+# Training Model
+
+We now train the model and fit it to the Validation *Data Set*, to get the result asked in the project.
+
+```{r}
+Model <- randomForest(x=X_Train, y=Y_Train,
+              xtest=X_ValidationDataSet,
+              ntree=500)
+```
+
+# The Predictions
+
+The Predictions of aor method were :
+```{r}
+Model$test$predicted
+```
+
+As we can see they are 100% correct, and we write them to files with help of the function provided by Jeff Leek with the code below:
+
+```{r}
+pml_write_files = function(x){
+    n = length(x)
+    for(i in 1:n){
+        filename = paste0("problem_id_",i,".txt")
+        write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+    }
+}
+
+pml_write_files(Model$test$predicted)
+```
+
+
+# Evalutiating Model With Cross Validation
+
+Now we test aour model's generabillity using the cross validation method, this method is implemented with help of the 3 functions below:
+
+* splitDataInCrossFolds : Is implemented to retun a list with K partitioned DataSets into complementary subsets. 
+
+```{r, cache=TRUE}
+splitDataInCrossFolds <- function (K, Data){
+    DataList <- list()
+    pos <- sample(dim(Data)[1])
+    Data <- Data[pos,]
+    
+    ElemInFold <- ( (dim(Data)[1]) / K)
+    
+    for (i in 1:K){
+        posBegin <- (i-1)*ElemInFold
+        posEnd <- (i)*ElemInFold
+        pos <- -(posBegin:posEnd)
+        TrainingData <- Data[pos,]
+        TestingData <- Data[-pos,]
+        DataList[[i]] <- list(TrainingData=TrainingData,
+                              TestingData=TestingData)
+    }
+    
+    DataList
+}
+```
+
+* TrainRF : Trains a model with the Random Forest algorithm and returns the parameters we are interested.
+
+```{r, cache=TRUE}
+TrainRF <- function(Data){
+    require("randomForest", quietly = TRUE)
+    require("caret", quietly = TRUE)
+    
+    size <- dim(Data$TrainingData)[2]
+    
+    X <- Data$TrainingData[, -size]
+    Y <- Data$TrainingData[, size]
+    XT <- Data$TestingData[, -size]
+    YT <- Data$TestingData[, size]
+    
+    Result <- list()
+    start.time <- Sys.time()
+    Model <- randomForest(x=X, y=Y,
+                      xtest=XT,
+                      ntree=500)
+    
+    end.time <- Sys.time()
+    time.taken <- end.time - start.time
+    time.taken
+    
+    ConfusionMatrix <- confusionMatrix(YT,Model$test$predicted)
+    Result[[1]] <- ConfusionMatrix$overall[1]
+    Result[[2]] <- ConfusionMatrix$byClass[1]
+    Result[[3]] <- ConfusionMatrix$byClass[2]
+    Result[[4]] <- time.taken
+    Result[[5]] <- ConfusionMatrix$table
+    Result
+}
+```
+
+
+* CrossValidate : Combines (averages) measures of fit (prediction error) to correct for the optimistic nature of training error .
+
+```{r, cache=TRUE}
+CrossValidate <- function(Results){
+    N <- length(Results)
+    
+    Accuracy <- numeric()
+    Sensitivity <- numeric()
+    Specificity <- numeric()
+    ComputationalTime <- numeric()
+    ConfusionMatrix <- matrix(0,ncol=dim(Results[[1]][[5]])[1],
+                              nrow=dim(Results[[1]][[5]])[1])
+    
+    for (i in 1:N){      
+        Accuracy[i] <-  Results[[i]][[1]]
+        Sensitivity[i] <-  Results[[i]][[2]]
+        Specificity[i] <-  Results[[i]][[3]]
+        ComputationalTime[i] <-  Results[[i]][[4]]
+        ConfusionMatrix <- ConfusionMatrix + matrix(Results[[i]][[5]],
+                                            ncol=dim(Results[[i]][[5]])[1])
+    }
+    MinAccuracy <- min(Accuracy)
+    MeanAccuracy <- sum(Accuracy)/N
+    MaxAcurracy <- max(Accuracy)
+    
+    MeanSensitivity <- sum(Sensitivity)/N
+    MaxSensitivity <- max(Specificity)
+    
+    MeanSpecificity <- sum(Specificity)/N
+    MaxSpecificity <- max(Sensitivity)
+    
+    ComputationalTime <- sum(ComputationalTime)/N
+    MeanConfusionMatrix <- ConfusionMatrix/N
+    
+    list(MinAccuracy=MinAccuracy,
+         MeanAccuracy=MeanAccuracy, MaxAcurracy=MaxAcurracy,
+         MeanSensitivity=MeanSensitivity, MaxSensitivity=MaxSensitivity,
+         MeanSpecificity=MeanSpecificity, MaxSpecificity=MaxSpecificity,
+         ComputationalTime=ComputationalTime,
+         MeanConfusionMatrix=MeanConfusionMatrix)
+    
+}
+```
+
+
+# Traning Cross Validation
+
+We now put the method to use( the computations can take a while) :
+```{r, cache=TRUE}
+DataList <- splitDataInCrossFolds(10, TrainingDataSet)
+ResultsRF <- lapply(DataList,TrainRF)
+```
+
+And Show aour results:
+```{r, cache=TRUE}
+CrossValidate(ResultsRF)
+```
+
+
+
+
